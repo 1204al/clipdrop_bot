@@ -116,6 +116,24 @@ def run_worker(config: AppConfig, *, run_once: bool = False) -> None:
             max_attempts,
         )
 
+        started_payload = _build_event_payload(job, "started")
+        started_callback_error: str | None = None
+        try:
+            _send_callback_with_retries(
+                callback_url=config.worker_bot_callback_url,
+                callback_secret=config.bot_callback_secret,
+                payload=started_payload,
+            )
+        except Exception as exc:  # noqa: BLE001
+            started_callback_error = str(exc)
+            logger.warning("Start callback failed job_id=%s error=%s", job_id, started_callback_error)
+        finally:
+            store.mark_notification(
+                job_id=job_id,
+                event_id=str(started_payload["event_id"]),
+                callback_error=started_callback_error,
+            )
+
         try:
             platform = Platform(str(job["platform"]))
             result = download_url(
@@ -149,6 +167,7 @@ def run_worker(config: AppConfig, *, run_once: bool = False) -> None:
             logger.info("Job done job_id=%s", job_id)
         except Exception:
             error = traceback.format_exc()
+            logger.exception("Download failed job_id=%s", job_id)
             failed_job, next_status = store.mark_failed_or_retry(job_id=job_id, error=error)
             if next_status == STATUS_QUEUED:
                 logger.warning("Job failed and re-queued job_id=%s", job_id)

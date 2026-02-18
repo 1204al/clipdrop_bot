@@ -38,14 +38,26 @@ class FakeUpdate:
         self.effective_user = user
 
 
+class FakeBot:
+    def __init__(self) -> None:
+        self.reaction_calls = 0
+        self.reaction_payloads: list[dict] = []
+
+    async def set_message_reaction(self, **kwargs) -> None:
+        self.reaction_calls += 1
+        self.reaction_payloads.append(dict(kwargs))
+
+
 class FakeApplication:
-    def __init__(self, runtime: TelegramBotRuntime) -> None:
+    def __init__(self, runtime: TelegramBotRuntime, bot: FakeBot) -> None:
         self.bot_data = {"runtime": runtime}
+        self.bot = bot
 
 
 class FakeContext:
-    def __init__(self, runtime: TelegramBotRuntime) -> None:
-        self.application = FakeApplication(runtime)
+    def __init__(self, runtime: TelegramBotRuntime, bot: FakeBot | None = None) -> None:
+        self.bot = bot or FakeBot()
+        self.application = FakeApplication(runtime, self.bot)
 
 
 def _runtime(tmp_path: Path) -> tuple[TelegramBotRuntime, TelegramAccessStore]:
@@ -240,3 +252,54 @@ def test_private_whitelisted_message_limits_to_first_five_links(tmp_path: Path) 
     assert called["enqueue"] == 1
     assert called["url_count"] == 5
     assert any("downloading first 5 only" in reply.lower() for reply in msg.replies)
+
+
+def test_running_job_from_enqueue_sets_start_reaction(tmp_path: Path) -> None:
+    runtime, store = _runtime(tmp_path)
+    store.authorize_chat(-1004)
+
+    async def fake_enqueue_jobs(*, urls, message):
+        return {"jobs": [{"job_id": "1", "status": "running"}]}
+
+    runtime.enqueue_jobs = fake_enqueue_jobs  # type: ignore[assignment]
+
+    msg = FakeMessage(
+        chat_id=-1004,
+        chat_type="group",
+        user_id=23,
+        text="https://x.com/u4/status/104",
+    )
+    update = FakeUpdate(msg, FakeUser(23))
+    bot = FakeBot()
+    context = FakeContext(runtime, bot=bot)
+
+    asyncio.run(handle_message(update, context))
+
+    assert bot.reaction_calls == 1
+    assert bot.reaction_payloads[0]["reaction"] == ["⏳"]
+    assert bot.reaction_payloads[0]["chat_id"] == -1004
+    assert bot.reaction_payloads[0]["message_id"] == 1
+
+
+def test_queued_job_from_enqueue_does_not_set_start_reaction(tmp_path: Path) -> None:
+    runtime, store = _runtime(tmp_path)
+    store.authorize_chat(-1005)
+
+    async def fake_enqueue_jobs(*, urls, message):
+        return {"jobs": [{"job_id": "1", "status": "queued"}]}
+
+    runtime.enqueue_jobs = fake_enqueue_jobs  # type: ignore[assignment]
+
+    msg = FakeMessage(
+        chat_id=-1005,
+        chat_type="group",
+        user_id=24,
+        text="https://x.com/u5/status/105",
+    )
+    update = FakeUpdate(msg, FakeUser(24))
+    bot = FakeBot()
+    context = FakeContext(runtime, bot=bot)
+
+    asyncio.run(handle_message(update, context))
+
+    assert bot.reaction_calls == 0

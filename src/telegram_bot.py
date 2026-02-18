@@ -67,6 +67,10 @@ class TelegramBotRuntime:
         self._event_id_order: deque[str] = deque(maxlen=5000)
         self._event_id_lock = threading.Lock()
 
+        self._start_reactions: set[tuple[int, int, str]] = set()
+        self._start_reaction_order: deque[tuple[int, int, str]] = deque(maxlen=10000)
+        self._start_reaction_lock = threading.Lock()
+
         self._http_server: ThreadingHTTPServer | None = None
         self._http_thread: threading.Thread | None = None
 
@@ -133,7 +137,7 @@ class TelegramBotRuntime:
             return 400, {"ok": False, "error": "missing event_id"}
 
         status = str(payload.get("status") or "").lower()
-        if status not in {"done", "failed"}:
+        if status not in {"started", "done", "failed"}:
             return 400, {"ok": False, "error": "invalid status"}
 
         if self._mark_event_seen(event_id):
@@ -173,10 +177,54 @@ class TelegramBotRuntime:
             self.logger.warning("Callback has no subscribers job_id=%s", payload.get("job_id"))
             return
 
-        if status == "done":
+        if status == "started":
+            await self._handle_started_event(payload, subscribers)
+        elif status == "done":
             await self._handle_done_event(payload, subscribers)
         else:
             await self._handle_failed_event(payload, subscribers)
+
+    def _mark_start_reaction_seen(self, *, chat_id: int, message_id: int, reaction: str) -> bool:
+        key = (chat_id, message_id, reaction)
+        with self._start_reaction_lock:
+            if key in self._start_reactions:
+                return True
+            if len(self._start_reaction_order) == self._start_reaction_order.maxlen:
+                dropped = self._start_reaction_order.popleft()
+                self._start_reactions.discard(dropped)
+            self._start_reaction_order.append(key)
+            self._start_reactions.add(key)
+            return False
+
+    async def set_start_reaction(self, *, subscribers: list[dict[str, Any]], bot: Any) -> None:
+        reaction = "⏳"
+        for sub in subscribers:
+            chat_id = int(sub["chat_id"])
+            message_id = int(sub["message_id"])
+
+            if self._mark_start_reaction_seen(chat_id=chat_id, message_id=message_id, reaction=reaction):
+                continue
+
+            try:
+                await bot.set_message_reaction(
+                    chat_id=chat_id,
+                    message_id=message_id,
+                    reaction=[reaction],
+                )
+            except Exception as exc:  # noqa: BLE001
+                self.logger.warning(
+                    "Failed set_message_reaction chat_id=%s message_id=%s error=%s",
+                    chat_id,
+                    message_id,
+                    exc,
+                )
+
+    async def set_start_reaction_for_message(self, *, message: Any, bot: Any) -> None:
+        await self.set_start_reaction(subscribers=[self._build_subscriber(message)], bot=bot)
+
+    async def _handle_started_event(self, payload: dict[str, Any], subscribers: list[dict[str, Any]]) -> None:
+        assert self.application is not None
+        await self.set_start_reaction(subscribers=subscribers, bot=self.application.bot)
 
     @staticmethod
     def _size_mb(file_path: Path) -> float:
@@ -391,8 +439,17 @@ class TelegramBotRuntime:
                 )
 
     async def _handle_failed_event(self, payload: dict[str, Any], subscribers: list[dict[str, Any]]) -> None:
-        error_text = str(payload.get("error") or "Unknown error")[-1200:]
-        text = f"Failed to download: {payload.get('input_url')}\n{error_text}"
+        self.logger.error(
+            "Download failed job_id=%s url=%s error=%s",
+            payload.get("job_id"),
+            payload.get("input_url"),
+            str(payload.get("error") or "Unknown error")[-1200:],
+        )
+        text = (
+            "I can't download this video right now due to a downloader error.\n"
+            f"URL: {payload.get('input_url')}\n"
+            "Please try again later."
+        )
         await self._broadcast_text(subscribers, text)
 
     async def _broadcast_text(self, subscribers: list[dict[str, Any]], text: str) -> None:
@@ -638,13 +695,16 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
 
     try:
         response = await runtime.enqueue_jobs(urls=selected, message=message)
+        jobs = list(response.get("jobs") or [])
+        if any(str(job.get("status") or "").lower() == "running" for job in jobs):
+            await runtime.set_start_reaction_for_message(message=message, bot=context.bot)
         runtime.logger.info(
             "Message queued chat_id=%s message_id=%s found_links=%s selected_links=%s jobs=%s",
             message.chat_id,
             message.message_id,
             len(deduped),
             len(selected),
-            len(response.get("jobs") or []),
+            len(jobs),
         )
     except Exception as exc:  # noqa: BLE001
         runtime.logger.error("Failed enqueue chat_id=%s error=%s", message.chat_id, exc)

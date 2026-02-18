@@ -13,11 +13,14 @@ class FakeBot:
     def __init__(self) -> None:
         self.video_calls = 0
         self.document_calls = 0
+        self.reaction_calls = 0
         self.messages: list[str] = []
         self.video_paths: list[str] = []
         self.document_paths: list[str] = []
+        self.reaction_payloads: list[dict] = []
         self.fail_video = False
         self.fail_document = False
+        self.fail_reaction = False
 
     async def send_video(self, **kwargs) -> None:
         self.video_calls += 1
@@ -33,6 +36,12 @@ class FakeBot:
 
     async def send_message(self, **kwargs) -> None:
         self.messages.append(str(kwargs.get("text") or ""))
+
+    async def set_message_reaction(self, **kwargs) -> None:
+        self.reaction_calls += 1
+        self.reaction_payloads.append(dict(kwargs))
+        if self.fail_reaction:
+            raise RuntimeError("reaction failed")
 
 
 class FakeApp:
@@ -74,8 +83,45 @@ def _done_payload(file_path: Path) -> dict[str, object]:
     }
 
 
+def _started_payload(*, event_id: str = "1:started:1") -> dict[str, object]:
+    return {
+        "event_id": event_id,
+        "job_id": "1",
+        "status": "started",
+        "platform": "x",
+        "input_url": "https://x.com/u/status/1",
+        "result": None,
+        "error": None,
+        "subscribers": [{"chat_id": 1, "message_id": 1, "thread_id": None}],
+    }
+
+
 def _run_done(runtime: TelegramBotRuntime, file_path: Path) -> None:
     asyncio.run(runtime.handle_job_event(_done_payload(file_path)))
+
+
+def test_started_event_sets_hourglass_reaction(tmp_path: Path) -> None:
+    bot = FakeBot()
+    runtime = _runtime(tmp_path)
+    runtime.application = FakeApp(bot)  # type: ignore[assignment]
+
+    asyncio.run(runtime.handle_job_event(_started_payload()))
+
+    assert bot.reaction_calls == 1
+    assert bot.reaction_payloads[0]["reaction"] == ["⏳"]
+    assert bot.reaction_payloads[0]["chat_id"] == 1
+    assert bot.reaction_payloads[0]["message_id"] == 1
+
+
+def test_started_event_deduplicates_reaction_calls_for_same_message(tmp_path: Path) -> None:
+    bot = FakeBot()
+    runtime = _runtime(tmp_path)
+    runtime.application = FakeApp(bot)  # type: ignore[assignment]
+
+    asyncio.run(runtime.handle_job_event(_started_payload(event_id="1:started:1")))
+    asyncio.run(runtime.handle_job_event(_started_payload(event_id="1:started:2")))
+
+    assert bot.reaction_calls == 1
 
 
 def test_done_event_sends_original_when_size_under_limit(tmp_path: Path) -> None:
@@ -319,3 +365,49 @@ def test_callback_idempotency() -> None:
     assert first_body["ok"] is True
     assert second_status == 200
     assert second_body["duplicate"] is True
+
+
+def test_callback_accepts_started_status() -> None:
+    runtime = TelegramBotRuntime(
+        service_base_url="http://127.0.0.1:8000",
+        callback_secret="secret",
+        callback_host="127.0.0.1",
+        callback_port=8090,
+        access_store=_store(),
+        auth_password="123",
+        logger=logging.getLogger("test-bot"),
+    )
+
+    status, body = runtime.handle_callback_request(
+        token="secret",
+        payload={"event_id": "1:started:1", "status": "started", "subscribers": [{"chat_id": 1, "message_id": 1}]},
+    )
+
+    assert status == 200
+    assert body["ok"] is True
+
+
+def test_failed_event_sends_generic_user_message(tmp_path: Path) -> None:
+    bot = FakeBot()
+    runtime = _runtime(tmp_path)
+    runtime.application = FakeApp(bot)  # type: ignore[assignment]
+
+    asyncio.run(
+        runtime.handle_job_event(
+            {
+                "event_id": "1:failed:2",
+                "job_id": "1",
+                "status": "failed",
+                "platform": "x",
+                "input_url": "https://x.com/u/status/1",
+                "error": "Traceback: sensitive details",
+                "subscribers": [{"chat_id": 1, "message_id": 1, "thread_id": None}],
+            }
+        )
+    )
+
+    assert bot.video_calls == 0
+    assert bot.document_calls == 0
+    assert len(bot.messages) == 1
+    assert "can't download this video right now" in bot.messages[0]
+    assert "Traceback:" not in bot.messages[0]

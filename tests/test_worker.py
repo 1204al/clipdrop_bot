@@ -48,7 +48,7 @@ def test_worker_processes_job_and_marks_done(app_config: AppConfig, monkeypatch)
     job = store.get_job(job_id)
     assert job is not None
     assert job["status"] == "done"
-    assert sent_payloads[0]["status"] == "done"
+    assert [payload["status"] for payload in sent_payloads] == ["started", "done"]
 
 
 def test_worker_retries_then_marks_failed_and_sends_callback(app_config: AppConfig, monkeypatch) -> None:
@@ -75,4 +75,4 @@ def test_worker_retries_then_marks_failed_and_sends_callback(app_config: AppConf
     second = store.get_job(job_id)
     assert second is not None
     assert second["status"] == "failed"
-    assert sent_payloads[-1]["status"] == "failed"
+    assert [payload["status"] for payload in sent_payloads] == ["started", "started", "failed"]
