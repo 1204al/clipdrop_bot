@@ -396,7 +396,6 @@ class TelegramBotRuntime:
                 return
             final_file_path = resized_path
 
-        caption = f"{payload.get('platform')}: {payload.get('input_url')}"
         for sub in subscribers:
             chat_id = int(sub["chat_id"])
             thread_id = sub.get("thread_id")
@@ -405,7 +404,6 @@ class TelegramBotRuntime:
                     await self.application.bot.send_video(
                         chat_id=chat_id,
                         video=fh,
-                        caption=caption,
                         message_thread_id=thread_id,
                         supports_streaming=True,
                     )
@@ -423,7 +421,6 @@ class TelegramBotRuntime:
                     await self.application.bot.send_document(
                         chat_id=chat_id,
                         document=fh,
-                        caption=caption,
                         message_thread_id=thread_id,
                     )
             except Exception as doc_exc:  # noqa: BLE001
