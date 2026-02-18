@@ -5,6 +5,7 @@ import logging
 from pathlib import Path
 import tempfile
 
+from telegram import ReactionTypeEmoji
 from telegram_access_store import TelegramAccessStore
 from telegram_bot import TelegramBotRuntime
 
@@ -100,7 +101,7 @@ def _run_done(runtime: TelegramBotRuntime, file_path: Path) -> None:
     asyncio.run(runtime.handle_job_event(_done_payload(file_path)))
 
 
-def test_started_event_sets_hourglass_reaction(tmp_path: Path) -> None:
+def test_started_event_sets_thumbs_up_reaction(tmp_path: Path) -> None:
     bot = FakeBot()
     runtime = _runtime(tmp_path)
     runtime.application = FakeApp(bot)  # type: ignore[assignment]
@@ -108,7 +109,10 @@ def test_started_event_sets_hourglass_reaction(tmp_path: Path) -> None:
     asyncio.run(runtime.handle_job_event(_started_payload()))
 
     assert bot.reaction_calls == 1
-    assert bot.reaction_payloads[0]["reaction"] == ["⏳"]
+    reaction = bot.reaction_payloads[0]["reaction"]
+    assert len(reaction) == 1
+    assert isinstance(reaction[0], ReactionTypeEmoji)
+    assert reaction[0].emoji == "👍"
     assert bot.reaction_payloads[0]["chat_id"] == 1
     assert bot.reaction_payloads[0]["message_id"] == 1
 

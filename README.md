@@ -118,7 +118,7 @@ Worker sends `POST /internal/job-events` to bot callback server (default `127.0.
 Bot enforces idempotency by `event_id`.
 
 Callback statuses:
-- `started`: worker claimed the job and started download; bot sets `⏳` reaction on the source message.
+- `started`: worker claimed the job and started download; bot sets `👍` reaction on the source message.
 - `done`: download completed; bot uploads media back to chat.
 - `failed`: download failed permanently; bot sends a generic failure message.
 
@@ -158,7 +158,7 @@ After chat authorization:
 - Public content only in v1 (no cookies/auth flow).
 - Bot is silent when message has no supported links.
 - If a message contains more than 5 supported unique links, bot downloads only the first 5 and sends a notice.
-- If enqueue response contains already `running` jobs (deduplicated active download), bot sets `⏳` reaction immediately.
+- If enqueue response contains already `running` jobs (deduplicated active download), bot sets `👍` reaction immediately.
 - In groups, disable Telegram privacy mode in BotFather if you want bot to read all messages.
 
 ## Telegram upload limits and auto-resize

@@ -14,7 +14,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from typing import Any
 
 import httpx
-from telegram import Update
+from telegram import ReactionTypeEmoji, Update
 from telegram.error import Conflict
 from telegram.ext import Application, ApplicationBuilder, CommandHandler, ContextTypes, MessageHandler, filters
 
@@ -197,7 +197,7 @@ class TelegramBotRuntime:
             return False
 
     async def set_start_reaction(self, *, subscribers: list[dict[str, Any]], bot: Any) -> None:
-        reaction = "⏳"
+        reaction = "👍"
         for sub in subscribers:
             chat_id = int(sub["chat_id"])
             message_id = int(sub["message_id"])
@@ -209,7 +209,7 @@ class TelegramBotRuntime:
                 await bot.set_message_reaction(
                     chat_id=chat_id,
                     message_id=message_id,
-                    reaction=[reaction],
+                    reaction=[ReactionTypeEmoji(emoji=reaction)],
                 )
             except Exception as exc:  # noqa: BLE001
                 self.logger.warning(

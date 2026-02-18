@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 from pathlib import Path
 
+from telegram import ReactionTypeEmoji
 from telegram_access_store import TelegramAccessStore
 from telegram_bot import TelegramBotRuntime, handle_message
 
@@ -276,7 +277,10 @@ def test_running_job_from_enqueue_sets_start_reaction(tmp_path: Path) -> None:
     asyncio.run(handle_message(update, context))
 
     assert bot.reaction_calls == 1
-    assert bot.reaction_payloads[0]["reaction"] == ["⏳"]
+    reaction = bot.reaction_payloads[0]["reaction"]
+    assert len(reaction) == 1
+    assert isinstance(reaction[0], ReactionTypeEmoji)
+    assert reaction[0].emoji == "👍"
     assert bot.reaction_payloads[0]["chat_id"] == -1004
     assert bot.reaction_payloads[0]["message_id"] == 1
 
