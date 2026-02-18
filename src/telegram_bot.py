@@ -40,6 +40,9 @@ class TelegramBotRuntime:
         access_store: TelegramAccessStore,
         auth_password: str,
         logger: logging.Logger,
+        upload_limit_mb: int = 50,
+        very_large_threshold_mb: int = 150,
+        resize_timeout_sec: int = 180,
     ) -> None:
         self.service_base_url = service_base_url.rstrip("/")
         self.callback_secret = callback_secret
@@ -48,6 +51,9 @@ class TelegramBotRuntime:
         self.access_store = access_store
         self.auth_password = auth_password
         self.logger = logger
+        self.upload_limit_mb = max(1, int(upload_limit_mb))
+        self.very_large_threshold_mb = max(self.upload_limit_mb, int(very_large_threshold_mb))
+        self.resize_timeout_sec = max(10, int(resize_timeout_sec))
 
         self.application: Application | None = None
         self._loop: asyncio.AbstractEventLoop | None = None
@@ -172,6 +178,118 @@ class TelegramBotRuntime:
         else:
             await self._handle_failed_event(payload, subscribers)
 
+    @staticmethod
+    def _size_mb(file_path: Path) -> float:
+        return file_path.stat().st_size / (1024 * 1024)
+
+    def _make_resized_path(self, file_path: Path) -> Path:
+        return file_path.with_name(f"{file_path.stem}_tg{self.upload_limit_mb}.mp4")
+
+    @staticmethod
+    async def _probe_duration_sec(file_path: Path) -> float | None:
+        try:
+            process = await asyncio.create_subprocess_exec(
+                "ffprobe",
+                "-v",
+                "error",
+                "-show_entries",
+                "format=duration",
+                "-of",
+                "default=noprint_wrappers=1:nokey=1",
+                str(file_path),
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
+            )
+        except FileNotFoundError:
+            return None
+
+        stdout, _ = await process.communicate()
+        if process.returncode != 0:
+            return None
+
+        raw = stdout.decode("utf-8", errors="ignore").strip()
+        if not raw:
+            return None
+        try:
+            duration = float(raw)
+        except ValueError:
+            return None
+        if duration <= 0:
+            return None
+        return duration
+
+    async def _resize_video_to_limit(
+        self,
+        *,
+        input_path: Path,
+        output_path: Path,
+        target_mb: int,
+        timeout_sec: int,
+    ) -> tuple[bool, str]:
+        duration = await self._probe_duration_sec(input_path)
+        target_bytes = int(target_mb * 1024 * 1024 * 0.95)
+        if duration and duration > 0:
+            total_bitrate = int((target_bytes * 8) / duration)
+        else:
+            total_bitrate = 800_000
+
+        audio_bitrate = min(128_000, max(64_000, int(total_bitrate * 0.15)))
+        video_bitrate = max(200_000, total_bitrate - audio_bitrate)
+        maxrate = int(video_bitrate * 1.2)
+        bufsize = maxrate * 2
+
+        cmd = [
+            "ffmpeg",
+            "-y",
+            "-i",
+            str(input_path),
+            "-c:v",
+            "libx264",
+            "-b:v",
+            str(video_bitrate),
+            "-maxrate",
+            str(maxrate),
+            "-bufsize",
+            str(bufsize),
+            "-preset",
+            "veryfast",
+            "-c:a",
+            "aac",
+            "-b:a",
+            str(audio_bitrate),
+            "-movflags",
+            "+faststart",
+            str(output_path),
+        ]
+
+        try:
+            process = await asyncio.create_subprocess_exec(
+                *cmd,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
+            )
+        except FileNotFoundError:
+            return False, "ffmpeg not found in PATH"
+
+        try:
+            _, stderr = await asyncio.wait_for(process.communicate(), timeout=float(timeout_sec))
+        except asyncio.TimeoutError:
+            process.kill()
+            await process.communicate()
+            return False, f"ffmpeg timed out after {timeout_sec}s"
+
+        if process.returncode != 0:
+            short = stderr.decode("utf-8", errors="ignore")[-500:]
+            return False, f"ffmpeg failed: {short}"
+
+        if not output_path.exists() or not output_path.is_file():
+            return False, "ffmpeg did not produce output file"
+
+        if self._size_mb(output_path) > target_mb:
+            return False, "resized file is still above Telegram upload limit"
+
+        return True, "ok"
+
     async def _handle_done_event(self, payload: dict[str, Any], subscribers: list[dict[str, Any]]) -> None:
         assert self.application is not None
 
@@ -185,12 +303,57 @@ class TelegramBotRuntime:
             )
             return
 
+        final_file_path = file_path
+        original_size_mb = self._size_mb(file_path)
+        if original_size_mb > self.very_large_threshold_mb:
+            await self._broadcast_text(
+                subscribers,
+                (
+                    "Файл дуже великий. Telegram Bot API дозволяє надсилати файли до "
+                    f"{self.upload_limit_mb}MB, цей файл перевищує поріг для авто-стискання."
+                ),
+            )
+            return
+
+        if original_size_mb > self.upload_limit_mb:
+            await self._broadcast_text(
+                subscribers,
+                f"Файл більший за {self.upload_limit_mb}MB. Стискаю до Telegram-ліміту, зачекайте.",
+            )
+            resized_path = self._make_resized_path(file_path)
+            ok, details = await self._resize_video_to_limit(
+                input_path=file_path,
+                output_path=resized_path,
+                target_mb=self.upload_limit_mb,
+                timeout_sec=self.resize_timeout_sec,
+            )
+            if not ok:
+                self.logger.warning(
+                    "Resize failed job_id=%s path=%s error=%s",
+                    payload.get("job_id"),
+                    file_path,
+                    details,
+                )
+                await self._broadcast_text(
+                    subscribers,
+                    "Не вдалося стиснути файл до 50MB для відправки в Telegram.",
+                )
+                return
+
+            if self._size_mb(resized_path) > self.upload_limit_mb:
+                await self._broadcast_text(
+                    subscribers,
+                    "Не вдалося стиснути файл до 50MB для відправки в Telegram.",
+                )
+                return
+            final_file_path = resized_path
+
         caption = f"{payload.get('platform')}: {payload.get('input_url')}"
         for sub in subscribers:
             chat_id = int(sub["chat_id"])
             thread_id = sub.get("thread_id")
             try:
-                with file_path.open("rb") as fh:
+                with final_file_path.open("rb") as fh:
                     await self.application.bot.send_video(
                         chat_id=chat_id,
                         video=fh,
@@ -208,7 +371,7 @@ class TelegramBotRuntime:
                 )
 
             try:
-                with file_path.open("rb") as fh:
+                with final_file_path.open("rb") as fh:
                     await self.application.bot.send_document(
                         chat_id=chat_id,
                         document=fh,
@@ -527,6 +690,9 @@ def main() -> None:
         access_store=access_store,
         auth_password=cfg.telegram_auth_password,
         logger=logger,
+        upload_limit_mb=cfg.telegram_upload_limit_mb,
+        very_large_threshold_mb=cfg.telegram_very_large_threshold_mb,
+        resize_timeout_sec=cfg.telegram_resize_timeout_sec,
     )
 
     lock_fd = acquire_single_instance_lock(Path(args.lock_file))

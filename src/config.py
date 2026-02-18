@@ -26,6 +26,9 @@ class AppConfig:
     telegram_callback_host: str
     telegram_callback_port: int
     telegram_lock_file: Path
+    telegram_upload_limit_mb: int
+    telegram_very_large_threshold_mb: int
+    telegram_resize_timeout_sec: int
     bot_service_url: str
     worker_bot_callback_url: str
     bot_callback_secret: str
@@ -55,6 +58,7 @@ def _env_float(key: str, default: float, minimum: float) -> float:
 
 def load_config(env_path: Path | None = None) -> AppConfig:
     load_env_file(env_path or Path(".env"))
+    upload_limit_mb = _env_int("TELEGRAM_UPLOAD_LIMIT_MB", default=50, minimum=1)
 
     return AppConfig(
         debug=env_flag_is_true(os.getenv("DEBUG")),
@@ -76,6 +80,13 @@ def load_config(env_path: Path | None = None) -> AppConfig:
         telegram_callback_host=os.getenv("TELEGRAM_CALLBACK_HOST", "127.0.0.1"),
         telegram_callback_port=_env_int("TELEGRAM_CALLBACK_PORT", default=8090, minimum=1),
         telegram_lock_file=Path(os.getenv("TELEGRAM_LOCK_FILE", ".telegram_bot.lock")),
+        telegram_upload_limit_mb=upload_limit_mb,
+        telegram_very_large_threshold_mb=_env_int(
+            "TELEGRAM_VERY_LARGE_THRESHOLD_MB",
+            default=150,
+            minimum=upload_limit_mb,
+        ),
+        telegram_resize_timeout_sec=_env_int("TELEGRAM_RESIZE_TIMEOUT_SEC", default=180, minimum=10),
         bot_service_url=os.getenv("BOT_SERVICE_URL", "http://127.0.0.1:8000"),
         worker_bot_callback_url=os.getenv(
             "WORKER_BOT_CALLBACK_URL",

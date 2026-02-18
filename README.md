@@ -155,6 +155,19 @@ After chat authorization:
 - If a message contains more than 5 supported unique links, bot downloads only the first 5 and sends a notice.
 - In groups, disable Telegram privacy mode in BotFather if you want bot to read all messages.
 
+## Telegram upload limits and auto-resize
+
+- `<= 50MB`: bot sends the original file (`sendVideo`, fallback to `sendDocument`).
+- `> 50MB` and `<= 150MB`: bot notifies user, resizes with `ffmpeg` to fit Telegram Bot API limit, and sends resized output.
+- `> 150MB`: bot notifies user that Telegram Bot API allows only up to 50MB and skips upload attempt.
+
+Requires `ffmpeg` and `ffprobe` available in `PATH`.
+
+User-facing messages:
+- `Файл більший за 50MB. Стискаю до Telegram-ліміту, зачекайте.`
+- `Файл дуже великий. Telegram Bot API дозволяє надсилати файли до 50MB, цей файл перевищує поріг для авто-стискання.`
+- `Не вдалося стиснути файл до 50MB для відправки в Telegram.`
+
 ## Tests
 
 ```bash
