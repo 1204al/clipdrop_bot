@@ -1,0 +1,11 @@
+.venv/
+__pycache__/
+*.pyc
+.env
+.pytest_cache/
+
+downloads/
+queue.jsonl
+results.jsonl
+.queue.lock
+.telegram_bot.lock

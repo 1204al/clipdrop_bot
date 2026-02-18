@@ -1,0 +1,31 @@
+[build-system]
+requires = ["hatchling>=1.26.0"]
+build-backend = "hatchling.build"
+
+[project]
+name = "clipdrop"
+version = "0.1.0"
+description = "Telegram downloader bot for TikTok/Instagram/X with queue worker and FastAPI service"
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = [
+  "fastapi>=0.116.1",
+  "httpx>=0.28.1",
+  "python-telegram-bot>=22.5",
+  "python-multipart>=0.0.20",
+  "pytest>=8.4.2",
+  "uvicorn>=0.35.0",
+  "yt-dlp>=2026.2.4",
+]
+
+[project.scripts]
+service = "cli.service:main"
+worker = "cli.worker:main"
+telegram-bot = "cli.telegram_bot:main"
+stack = "cli.stack:main"
+
+[tool.hatch.build.targets.wheel]
+only-include = ["src"]
+
+[tool.hatch.build.targets.wheel.sources]
+"src" = ""
