@@ -84,7 +84,7 @@ def _to_job_payload(job: dict[str, Any]) -> dict[str, Any]:
 
 def create_app(config: AppConfig | None = None) -> FastAPI:
     cfg = config or load_config()
-    logger = setup_logger("service", cfg.debug)
+    logger = setup_logger("service", cfg.debug, cfg.log_file)
     runtime = ServiceRuntime(config=cfg, store=_build_store(cfg))
 
     app = FastAPI(title="clipdrop", version="0.1.0")

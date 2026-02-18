@@ -32,6 +32,7 @@ class AppConfig:
     bot_service_url: str
     worker_bot_callback_url: str
     bot_callback_secret: str
+    log_file: Path | None
 
 
 def _env_int(key: str, default: int, minimum: int) -> int:
@@ -43,6 +44,13 @@ def _env_int(key: str, default: int, minimum: int) -> int:
     except ValueError:
         return default
     return max(minimum, value)
+
+
+def _log_file_path() -> Path | None:
+    raw = os.getenv("LOG_FILE")
+    if not raw or not raw.strip():
+        return None
+    return Path(raw.strip())
 
 
 def _env_float(key: str, default: float, minimum: float) -> float:
@@ -93,4 +101,5 @@ def load_config(env_path: Path | None = None) -> AppConfig:
             "http://127.0.0.1:8090/internal/job-events",
         ),
         bot_callback_secret=os.getenv("BOT_CALLBACK_SECRET", "change-me"),
+        log_file=_log_file_path(),
     )

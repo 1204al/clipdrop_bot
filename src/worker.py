@@ -83,7 +83,7 @@ def _send_callback_with_retries(
 
 
 def run_worker(config: AppConfig, *, run_once: bool = False) -> None:
-    logger = setup_logger("worker", config.debug)
+    logger = setup_logger("worker", config.debug, config.log_file)
     store = build_job_store(config)
     worker_id = build_worker_id()
 

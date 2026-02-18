@@ -734,7 +734,7 @@ def main() -> None:
     if not cfg.telegram_auth_password:
         raise RuntimeError("Set TELEGRAM_AUTH_PASSWORD in environment or .env")
 
-    logger = setup_logger("telegram-bot", cfg.debug)
+    logger = setup_logger("telegram-bot", cfg.debug, cfg.log_file)
 
     access_store = TelegramAccessStore(
         authorized_chats_file=cfg.telegram_authorized_chats_file,

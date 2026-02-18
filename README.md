@@ -138,6 +138,7 @@ Callback statuses:
 ```bash
 /auth 123
 ```
+(or any other, that you can setup in .env)
 
 Rules:
 - `/auth` works only in group/supergroup.
