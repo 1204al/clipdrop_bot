@@ -9,3 +9,13 @@ queue.jsonl
 results.jsonl
 .queue.lock
 .telegram_bot.lock
+
+# OS-generated junk files
+.DS_Store
+**/.DS_Store
+Thumbs.db
+Desktop.ini
+$RECYCLE.BIN/
+.Spotlight-V100/
+.Trashes/
+._*
