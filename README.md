@@ -124,6 +124,8 @@ Callback statuses:
 
 ## Queue files
 
+These are created at runtime and are not committed (see `.gitignore`):
+
 - `queue.jsonl`: append-only state snapshots per job
 - `results.jsonl`: terminal states (`done` / `failed`)
 - `telegram_authorized_chats.json`: authorized group/supergroup chat IDs

@@ -9,6 +9,10 @@ queue.jsonl
 results.jsonl
 .queue.lock
 .telegram_bot.lock
+.telegram_access.lock
+app.log
+telegram_authorized_chats.json
+telegram_whitelist.txt
 
 # OS-generated junk files
 .DS_Store
